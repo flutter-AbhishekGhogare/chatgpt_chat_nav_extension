@@ -11,6 +11,7 @@
   const LAUNCHER_ID = "ctn-launcher";
   const COLLAPSED_LIST_CLASS = "ctn-collapsed-list";
   const PREVIEW_CLASS = "ctn-preview";
+  const FOOTER_LINK = "https://abhishek-ghogare.vercel.app/";
 
   let messageCounter = 0;
   let scheduled = null;
@@ -85,9 +86,17 @@
     const preview = document.createElement("div");
     preview.className = PREVIEW_CLASS;
 
+    const footer = document.createElement("div");
+    footer.className = "ctn-footer";
+    footer.innerHTML = 'Made by Abhishek with <span class="ctn-heart" aria-hidden="true"></span>';
+    footer.addEventListener("click", () => {
+      window.open(FOOTER_LINK, "_blank", "noopener");
+    });
+
     panel.appendChild(header);
     panel.appendChild(list);
     panel.appendChild(collapsedList);
+    panel.appendChild(footer);
     document.body.appendChild(panel);
     document.body.appendChild(preview);
 
@@ -115,6 +124,15 @@
     bothBtn.addEventListener("click", () => setMode(MODE_BOTH));
 
     setMode(MODE_BOTH);
+
+    // Default to collapsed on load
+    panel.classList.add("ctn-collapsed");
+    document.body.classList.add(BODY_COLLAPSED_CLASS);
+    document.body.classList.remove(BODY_SHIFT_CLASS);
+    minimizeBtn.textContent = "Max";
+    if (lastNodes.length > 0) {
+      renderCollapsed(lastNodes);
+    }
 
     const setHidden = (hidden) => {
       panel.classList.toggle("ctn-hidden", hidden);
