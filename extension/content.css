@@ -398,7 +398,7 @@
   display: block;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 300px) {
   .ctn-panel {
     display: none;
   }
@@ -426,7 +426,7 @@ body.ctn-body-collapsed [data-testid="conversation-panel"] {
   margin-right: var(--ctn-panel-width-collapsed);
 }
 
-@media (max-width: 900px) {
+@media (max-width: 300px) {
   body.ctn-body-shift main,
   body.ctn-body-shift header,
   body.ctn-body-shift footer,
