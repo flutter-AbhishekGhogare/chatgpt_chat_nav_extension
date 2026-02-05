@@ -186,6 +186,11 @@
 
     const button = document.createElement("button");
     button.className = ITEM_CLASS;
+    if (role === "user") {
+      button.classList.add("ctn-item-user");
+    } else if (role === "assistant") {
+      button.classList.add("ctn-item-assistant");
+    }
     button.type = "button";
     button.dataset.targetId = id;
 
