@@ -295,17 +295,38 @@
 }
 
 .ctn-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--ctn-panel-muted);
-  border: 1px solid var(--ctn-panel-border);
+  width: 28px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  color: var(--ctn-panel-muted);
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 6px;
+}
+
+.ctn-dot::before {
+  content: "";
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.ctn-dot.ctn-dot-user {
+  color: var(--ctn-panel-accent);
+}
+
+.ctn-dot.ctn-dot-assistant {
+  color: var(--ctn-panel-muted);
 }
 
 .ctn-dot:hover {
-  background: var(--ctn-panel-accent);
-  border-color: var(--ctn-panel-accent);
+  color: var(--ctn-panel-text);
+  background: var(--ctn-item-hover);
 }
 
 .ctn-preview {

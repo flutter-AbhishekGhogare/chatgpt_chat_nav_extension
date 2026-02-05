@@ -260,14 +260,9 @@
       dot.className = "ctn-dot";
       dot.dataset.targetId = id;
       dot.dataset.preview = text || "(empty)";
-
-      dot.addEventListener("click", () => {
-        const target = document.querySelector(`[${MESSAGE_ATTR}="${id}"]`);
-        if (!target) return;
-        target.scrollIntoView({ behavior: "smooth", block: "center" });
-        target.classList.add(HIGHLIGHT_CLASS);
-        setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
-      });
+      const role = getRole(node);
+      if (role === "user") dot.classList.add("ctn-dot-user");
+      if (role === "assistant") dot.classList.add("ctn-dot-assistant");
 
       collapsedList.appendChild(dot);
     });
@@ -290,6 +285,17 @@
       lastHoverId = null;
       preview.classList.remove("ctn-visible");
       preview.style.display = "none";
+    };
+
+    collapsedList.onclick = (event) => {
+      const dot = event.target.closest(".ctn-dot");
+      if (!dot) return;
+      const id = dot.dataset.targetId;
+      const target = document.querySelector(`[${MESSAGE_ATTR}="${id}"]`);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add(HIGHLIGHT_CLASS);
+      setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
     };
   };
 
