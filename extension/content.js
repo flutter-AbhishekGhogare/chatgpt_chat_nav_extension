@@ -178,7 +178,7 @@
     });
   };
 
-  const buildListItem = (node) => {
+  const buildListItem = (node, displayIndex) => {
     const id = node.getAttribute(MESSAGE_ATTR);
     const role = getRole(node);
     const text = getMessageText(node);
@@ -204,7 +204,7 @@
 
     const pill = document.createElement("span");
     pill.className = "ctn-pill";
-    pill.textContent = id.split("-")[1];
+    pill.textContent = String(displayIndex);
     roleEl.appendChild(pill);
 
     button.appendChild(roleEl);
@@ -233,7 +233,9 @@
       return role === "user";
     });
 
-    filtered.forEach((node) => list.appendChild(buildListItem(node)));
+    filtered.forEach((node, index) =>
+      list.appendChild(buildListItem(node, index + 1))
+    );
     renderCollapsed(filtered);
   };
 
