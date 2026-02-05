@@ -232,7 +232,7 @@
       const target = document.querySelector(`[${MESSAGE_ATTR}="${id}"]`);
       if (!target) return;
 
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
       target.classList.add(HIGHLIGHT_CLASS);
       setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
     });
@@ -311,7 +311,7 @@
       const id = dot.dataset.targetId;
       const target = document.querySelector(`[${MESSAGE_ATTR}="${id}"]`);
       if (!target) return;
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
       target.classList.add(HIGHLIGHT_CLASS);
       setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
     };
