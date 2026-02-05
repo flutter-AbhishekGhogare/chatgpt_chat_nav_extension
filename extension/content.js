@@ -1,0 +1,210 @@
+(() => {
+  const PANEL_ID = "ctn-panel";
+  const LIST_ID = "ctn-list";
+  const ITEM_CLASS = "ctn-item";
+  const HIGHLIGHT_CLASS = "ctn-message-highlight";
+  const MESSAGE_ATTR = "data-ctn-message-id";
+  const MODE_USER = "user";
+  const MODE_BOTH = "both";
+
+  let messageCounter = 0;
+  let scheduled = null;
+  let lastMessageCount = 0;
+  let currentMode = MODE_BOTH;
+  let lastNodes = [];
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const createPanel = () => {
+    if (document.getElementById(PANEL_ID)) return;
+
+    const panel = document.createElement("aside");
+    panel.id = PANEL_ID;
+    panel.className = "ctn-panel";
+
+    const header = document.createElement("div");
+    header.className = "ctn-header";
+
+    const title = document.createElement("div");
+    title.className = "ctn-title";
+    title.textContent = "Thread Navigator";
+
+    const toggle = document.createElement("div");
+    toggle.className = "ctn-toggle";
+
+    const userBtn = document.createElement("button");
+    userBtn.type = "button";
+    userBtn.dataset.mode = MODE_USER;
+    userBtn.textContent = "User";
+
+    const bothBtn = document.createElement("button");
+    bothBtn.type = "button";
+    bothBtn.dataset.mode = MODE_BOTH;
+    bothBtn.textContent = "User + GPT";
+
+    toggle.appendChild(userBtn);
+    toggle.appendChild(bothBtn);
+
+    header.appendChild(title);
+    header.appendChild(toggle);
+
+    const list = document.createElement("div");
+    list.id = LIST_ID;
+    list.className = "ctn-list";
+
+    panel.appendChild(header);
+    panel.appendChild(list);
+    document.body.appendChild(panel);
+
+    document.body.style.paddingRight = "280px";
+
+    const setMode = (mode) => {
+      currentMode = mode;
+      userBtn.classList.toggle("ctn-active", mode === MODE_USER);
+      bothBtn.classList.toggle("ctn-active", mode === MODE_BOTH);
+      if (lastNodes.length > 0) {
+        renderList(lastNodes);
+      } else {
+        refresh();
+      }
+    };
+
+    userBtn.addEventListener("click", () => setMode(MODE_USER));
+    bothBtn.addEventListener("click", () => setMode(MODE_BOTH));
+
+    setMode(MODE_BOTH);
+  };
+
+  const getMessageNodes = () => {
+    const turnNodes = Array.from(
+      document.querySelectorAll('article[data-testid="conversation-turn"]')
+    );
+    if (turnNodes.length > 0) return turnNodes;
+
+    const roleNodes = Array.from(
+      document.querySelectorAll("[data-message-author-role]")
+    );
+    if (roleNodes.length > 0) return roleNodes;
+
+    const articleNodes = Array.from(document.querySelectorAll("main article"));
+    if (articleNodes.length > 0) return articleNodes;
+
+    return [];
+  };
+
+  const getRole = (node) => {
+    const roleEl = node.matches("[data-message-author-role]")
+      ? node
+      : node.querySelector("[data-message-author-role]");
+    return roleEl?.getAttribute("data-message-author-role") || "unknown";
+  };
+
+  const getMessageText = (node) => {
+    const text = node.innerText || node.textContent || "";
+    return text.replace(/\s+/g, " ").trim();
+  };
+
+  const ensureMessageIds = (nodes) => {
+    nodes.forEach((node) => {
+      if (!node.getAttribute(MESSAGE_ATTR)) {
+        node.setAttribute(MESSAGE_ATTR, `ctn-${messageCounter++}`);
+      }
+    });
+  };
+
+  const buildListItem = (node) => {
+    const id = node.getAttribute(MESSAGE_ATTR);
+    const role = getRole(node);
+    const text = getMessageText(node);
+    const title = text.length > 140 ? `${text.slice(0, 140)}...` : text || "(empty)";
+
+    const button = document.createElement("button");
+    button.className = ITEM_CLASS;
+    button.type = "button";
+    button.dataset.targetId = id;
+
+    const roleEl = document.createElement("div");
+    roleEl.className = "ctn-role";
+    roleEl.textContent = role;
+
+    const textEl = document.createElement("div");
+    textEl.className = "ctn-text";
+    textEl.textContent = title;
+
+    const pill = document.createElement("span");
+    pill.className = "ctn-pill";
+    pill.textContent = id.split("-")[1];
+    roleEl.appendChild(pill);
+
+    button.appendChild(roleEl);
+    button.appendChild(textEl);
+
+    button.addEventListener("click", () => {
+      const target = document.querySelector(`[${MESSAGE_ATTR}="${id}"]`);
+      if (!target) return;
+
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add(HIGHLIGHT_CLASS);
+      setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
+    });
+
+    return button;
+  };
+
+  const renderList = (nodes) => {
+    const list = document.getElementById(LIST_ID);
+    if (!list) return;
+
+    list.innerHTML = "";
+    const filtered = nodes.filter((node) => {
+      if (currentMode === MODE_BOTH) return true;
+      const role = getRole(node);
+      return role === "user";
+    });
+
+    filtered.forEach((node) => list.appendChild(buildListItem(node)));
+  };
+
+  const refresh = async () => {
+    const nodes = getMessageNodes();
+    if (nodes.length === 0) return;
+
+    ensureMessageIds(nodes);
+    lastNodes = nodes;
+
+    if (nodes.length !== lastMessageCount) {
+      lastMessageCount = nodes.length;
+      renderList(nodes);
+    }
+  };
+
+  const scheduleRefresh = () => {
+    if (scheduled) return;
+    scheduled = requestAnimationFrame(async () => {
+      scheduled = null;
+      await refresh();
+    });
+  };
+
+  const installObserver = () => {
+    const observer = new MutationObserver(() => scheduleRefresh());
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+  };
+
+  const init = async () => {
+    createPanel();
+    await sleep(400);
+    await refresh();
+    installObserver();
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
