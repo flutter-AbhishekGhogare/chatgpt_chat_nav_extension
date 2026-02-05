@@ -6,6 +6,9 @@
   const MESSAGE_ATTR = "data-ctn-message-id";
   const MODE_USER = "user";
   const MODE_BOTH = "both";
+  const BODY_SHIFT_CLASS = "ctn-body-shift";
+  const BODY_COLLAPSED_CLASS = "ctn-body-collapsed";
+  const LAUNCHER_ID = "ctn-launcher";
 
   let messageCounter = 0;
   let scheduled = null;
@@ -29,6 +32,25 @@
     title.className = "ctn-title";
     title.textContent = "Thread Navigator";
 
+    const headerRow = document.createElement("div");
+    headerRow.className = "ctn-header-row";
+
+    const actions = document.createElement("div");
+    actions.className = "ctn-actions";
+
+    const minimizeBtn = document.createElement("button");
+    minimizeBtn.type = "button";
+    minimizeBtn.className = "ctn-action-btn";
+    minimizeBtn.textContent = "Min";
+
+    const hideBtn = document.createElement("button");
+    hideBtn.type = "button";
+    hideBtn.className = "ctn-action-btn";
+    hideBtn.textContent = "Hide";
+
+    actions.appendChild(minimizeBtn);
+    actions.appendChild(hideBtn);
+
     const toggle = document.createElement("div");
     toggle.className = "ctn-toggle";
 
@@ -45,7 +67,10 @@
     toggle.appendChild(userBtn);
     toggle.appendChild(bothBtn);
 
-    header.appendChild(title);
+    headerRow.appendChild(title);
+    headerRow.appendChild(actions);
+
+    header.appendChild(headerRow);
     header.appendChild(toggle);
 
     const list = document.createElement("div");
@@ -56,7 +81,14 @@
     panel.appendChild(list);
     document.body.appendChild(panel);
 
-    document.body.style.paddingRight = "280px";
+    document.body.classList.add(BODY_SHIFT_CLASS);
+
+    const launcher = document.createElement("button");
+    launcher.id = LAUNCHER_ID;
+    launcher.className = "ctn-launcher";
+    launcher.type = "button";
+    launcher.textContent = "Nav";
+    document.body.appendChild(launcher);
 
     const setMode = (mode) => {
       currentMode = mode;
@@ -73,6 +105,27 @@
     bothBtn.addEventListener("click", () => setMode(MODE_BOTH));
 
     setMode(MODE_BOTH);
+
+    const setHidden = (hidden) => {
+      panel.classList.toggle("ctn-hidden", hidden);
+      launcher.style.display = hidden ? "block" : "none";
+      document.body.classList.toggle(BODY_SHIFT_CLASS, !hidden);
+      if (hidden) {
+        document.body.classList.remove(BODY_COLLAPSED_CLASS);
+        panel.classList.remove("ctn-collapsed");
+        minimizeBtn.textContent = "Min";
+      }
+    };
+
+    minimizeBtn.addEventListener("click", () => {
+      const isCollapsed = panel.classList.toggle("ctn-collapsed");
+      document.body.classList.toggle(BODY_COLLAPSED_CLASS, isCollapsed);
+      document.body.classList.toggle(BODY_SHIFT_CLASS, !isCollapsed);
+      minimizeBtn.textContent = isCollapsed ? "Max" : "Min";
+    });
+
+    hideBtn.addEventListener("click", () => setHidden(true));
+    launcher.addEventListener("click", () => setHidden(false));
   };
 
   const getMessageNodes = () => {
