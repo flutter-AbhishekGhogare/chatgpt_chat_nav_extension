@@ -9,6 +9,8 @@
   const BODY_SHIFT_CLASS = "ctn-body-shift";
   const BODY_COLLAPSED_CLASS = "ctn-body-collapsed";
   const LAUNCHER_ID = "ctn-launcher";
+  const COLLAPSED_LIST_CLASS = "ctn-collapsed-list";
+  const PREVIEW_CLASS = "ctn-preview";
 
   let messageCounter = 0;
   let scheduled = null;
@@ -77,9 +79,17 @@
     list.id = LIST_ID;
     list.className = "ctn-list";
 
+    const collapsedList = document.createElement("div");
+    collapsedList.className = COLLAPSED_LIST_CLASS;
+
+    const preview = document.createElement("div");
+    preview.className = PREVIEW_CLASS;
+
     panel.appendChild(header);
     panel.appendChild(list);
+    panel.appendChild(collapsedList);
     document.body.appendChild(panel);
+    document.body.appendChild(preview);
 
     document.body.classList.add(BODY_SHIFT_CLASS);
 
@@ -122,6 +132,9 @@
       document.body.classList.toggle(BODY_COLLAPSED_CLASS, isCollapsed);
       document.body.classList.toggle(BODY_SHIFT_CLASS, !isCollapsed);
       minimizeBtn.textContent = isCollapsed ? "Max" : "Min";
+      if (lastNodes.length > 0) {
+        renderCollapsed(lastNodes);
+      }
     });
 
     hideBtn.addEventListener("click", () => setHidden(true));
@@ -210,12 +223,67 @@
 
     list.innerHTML = "";
     const filtered = nodes.filter((node) => {
-      if (currentMode === MODE_BOTH) return true;
       const role = getRole(node);
+      if (currentMode === MODE_BOTH) return role === "user" || role === "assistant";
       return role === "user";
     });
 
     filtered.forEach((node) => list.appendChild(buildListItem(node)));
+    renderCollapsed(filtered);
+  };
+
+  const renderCollapsed = (filteredNodes) => {
+    const collapsedList = document.querySelector(`.${COLLAPSED_LIST_CLASS}`);
+    const preview = document.querySelector(`.${PREVIEW_CLASS}`);
+    if (!collapsedList || !preview) return;
+
+    collapsedList.innerHTML = "";
+    preview.classList.remove("ctn-visible");
+
+    const getPreviewText = (node) => {
+      const text = getMessageText(node);
+      if (!text) return "(empty)";
+      return text.length > 140 ? `${text.slice(0, 140)}…` : text;
+    };
+
+    filteredNodes.forEach((node) => {
+      const id = node.getAttribute(MESSAGE_ATTR);
+      const text = getPreviewText(node);
+      const dot = document.createElement("div");
+      dot.className = "ctn-dot";
+      dot.dataset.targetId = id;
+      dot.dataset.preview = text || "(empty)";
+
+      dot.addEventListener("click", () => {
+        const target = document.querySelector(`[${MESSAGE_ATTR}="${id}"]`);
+        if (!target) return;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.add(HIGHLIGHT_CLASS);
+        setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
+      });
+
+      collapsedList.appendChild(dot);
+    });
+
+    let lastHoverId = null;
+    collapsedList.onmousemove = (event) => {
+      const dot = event.target.closest(".ctn-dot");
+      if (!dot) return;
+      if (lastHoverId !== dot.dataset.targetId) {
+        lastHoverId = dot.dataset.targetId;
+        const rect = dot.getBoundingClientRect();
+        preview.textContent = dot.dataset.preview;
+        preview.style.top = `${Math.max(12, rect.top - 6)}px`;
+        preview.classList.add("ctn-visible");
+        preview.style.display = "block";
+      }
+    };
+
+    collapsedList.onmouseleave = () => {
+      lastHoverId = null;
+      preview.classList.remove("ctn-visible");
+      preview.style.display = "none";
+    };
   };
 
   const refresh = async () => {
@@ -228,6 +296,14 @@
     if (nodes.length !== lastMessageCount) {
       lastMessageCount = nodes.length;
       renderList(nodes);
+    } else {
+      renderCollapsed(
+        nodes.filter((node) => {
+          const role = getRole(node);
+          if (currentMode === MODE_BOTH) return role === "user" || role === "assistant";
+          return role === "user";
+        })
+      );
     }
   };
 

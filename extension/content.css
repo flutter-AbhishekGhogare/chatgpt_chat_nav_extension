@@ -222,6 +222,58 @@
   width: 100%;
 }
 
+.ctn-collapsed-list {
+  display: none;
+  padding: 8px 6px 12px 6px;
+  gap: 8px;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.ctn-collapsed .ctn-collapsed-list {
+  display: flex;
+}
+
+.ctn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ctn-panel-muted);
+  border: 1px solid var(--ctn-panel-border);
+  cursor: pointer;
+}
+
+.ctn-dot:hover {
+  background: var(--ctn-panel-accent);
+  border-color: var(--ctn-panel-accent);
+}
+
+.ctn-preview {
+  position: fixed;
+  right: calc(var(--ctn-panel-width-collapsed) + 10px);
+  max-width: 260px;
+  background: var(--ctn-item-bg);
+  border: 1px solid var(--ctn-panel-border);
+  box-shadow: 0 8px 24px var(--ctn-panel-shadow);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ctn-panel-text);
+  display: none;
+  z-index: 10000;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctn-preview.ctn-visible {
+  display: block;
+}
+
 @media (max-width: 900px) {
   .ctn-panel {
     display: none;
