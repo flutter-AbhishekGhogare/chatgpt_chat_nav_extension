@@ -12,14 +12,37 @@
   const COLLAPSED_LIST_CLASS = "ctn-collapsed-list";
   const PREVIEW_CLASS = "ctn-preview";
   const FOOTER_LINK = "https://abhishek-ghogare.vercel.app/";
+  const REFRESH_THROTTLE_MS = 120;
 
   let messageCounter = 0;
-  let scheduled = null;
-  let lastMessageCount = 0;
+  let rafHandle = null;
+  let timerHandle = null;
+  let mutationObserver = null;
+  let initialized = false;
   let currentMode = MODE_BOTH;
   let lastNodes = [];
+  let lastRenderKey = "";
+  let forceNextRender = false;
+
+  const refs = {
+    panel: null,
+    list: null,
+    collapsedList: null,
+    preview: null,
+    launcher: null
+  };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const scrollToMessage = (id) => {
+    if (!id) return;
+    const target = document.querySelector(`[${MESSAGE_ATTR}="${id}"]`);
+    if (!target) return;
+
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    target.classList.add(HIGHLIGHT_CLASS);
+    window.setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
+  };
 
   const createPanel = () => {
     if (document.getElementById(PANEL_ID)) return;
@@ -100,6 +123,11 @@
     document.body.appendChild(panel);
     document.body.appendChild(preview);
 
+    refs.panel = panel;
+    refs.list = list;
+    refs.collapsedList = collapsedList;
+    refs.preview = preview;
+
     document.body.classList.add(BODY_SHIFT_CLASS);
 
     const launcher = document.createElement("button");
@@ -108,15 +136,18 @@
     launcher.type = "button";
     launcher.textContent = "Nav";
     document.body.appendChild(launcher);
+    refs.launcher = launcher;
 
     const setMode = (mode) => {
       currentMode = mode;
       userBtn.classList.toggle("ctn-active", mode === MODE_USER);
       bothBtn.classList.toggle("ctn-active", mode === MODE_BOTH);
+      lastRenderKey = "";
+
       if (lastNodes.length > 0) {
         renderList(lastNodes);
       } else {
-        refresh();
+        scheduleRefresh(true);
       }
     };
 
@@ -131,7 +162,7 @@
     document.body.classList.remove(BODY_SHIFT_CLASS);
     minimizeBtn.textContent = "Max";
     if (lastNodes.length > 0) {
-      renderCollapsed(lastNodes);
+      renderCollapsed(filterVisibleNodes(lastNodes));
     }
 
     const setHidden = (hidden) => {
@@ -151,12 +182,43 @@
       document.body.classList.toggle(BODY_SHIFT_CLASS, !isCollapsed);
       minimizeBtn.textContent = isCollapsed ? "Max" : "Min";
       if (lastNodes.length > 0) {
-        renderCollapsed(lastNodes);
+        renderCollapsed(filterVisibleNodes(lastNodes));
       }
     });
 
     hideBtn.addEventListener("click", () => setHidden(true));
     launcher.addEventListener("click", () => setHidden(false));
+
+    list.addEventListener("click", (event) => {
+      const item = event.target.closest(`.${ITEM_CLASS}`);
+      if (!item) return;
+      scrollToMessage(item.dataset.targetId);
+    });
+
+    let lastHoverId = null;
+    collapsedList.addEventListener("mousemove", (event) => {
+      const dot = event.target.closest(".ctn-dot");
+      if (!dot || lastHoverId === dot.dataset.targetId) return;
+
+      lastHoverId = dot.dataset.targetId;
+      const rect = dot.getBoundingClientRect();
+      preview.textContent = dot.dataset.preview || "(empty)";
+      preview.style.top = `${Math.max(12, rect.top - 6)}px`;
+      preview.classList.add("ctn-visible");
+      preview.style.display = "block";
+    });
+
+    collapsedList.addEventListener("mouseleave", () => {
+      lastHoverId = null;
+      preview.classList.remove("ctn-visible");
+      preview.style.display = "none";
+    });
+
+    collapsedList.addEventListener("click", (event) => {
+      const dot = event.target.closest(".ctn-dot");
+      if (!dot) return;
+      scrollToMessage(dot.dataset.targetId);
+    });
   };
 
   const getMessageNodes = () => {
@@ -184,7 +246,7 @@
   };
 
   const getMessageText = (node) => {
-    const text = node.innerText || node.textContent || "";
+    const text = node.textContent || "";
     return text.replace(/\s+/g, " ").trim();
   };
 
@@ -228,142 +290,203 @@
     button.appendChild(roleEl);
     button.appendChild(textEl);
 
-    button.addEventListener("click", () => {
-      const target = document.querySelector(`[${MESSAGE_ATTR}="${id}"]`);
-      if (!target) return;
-
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-      target.classList.add(HIGHLIGHT_CLASS);
-      setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
-    });
-
     return button;
   };
 
-  const renderList = (nodes) => {
-    const list = document.getElementById(LIST_ID);
-    if (!list) return;
-
-    list.innerHTML = "";
-    const filtered = nodes.filter((node) => {
+  const filterVisibleNodes = (nodes) =>
+    nodes.filter((node) => {
       const role = getRole(node);
       if (currentMode === MODE_BOTH) return role === "user" || role === "assistant";
       return role === "user";
     });
 
-    filtered.forEach((node, index) =>
-      list.appendChild(buildListItem(node, index + 1))
-    );
+  const getRenderKey = (filteredNodes) =>
+    `${currentMode}:${filteredNodes
+      .map((node) => `${node.getAttribute(MESSAGE_ATTR)}:${getRole(node)}`)
+      .join("|")}`;
+
+  const renderList = (nodes) => {
+    const list = refs.list;
+    if (!list) return;
+
+    const filtered = filterVisibleNodes(nodes);
+    const renderKey = getRenderKey(filtered);
+    if (!forceNextRender && renderKey === lastRenderKey) return;
+    lastRenderKey = renderKey;
+    forceNextRender = false;
+
+    const fragment = document.createDocumentFragment();
+    filtered.forEach((node, index) => {
+      fragment.appendChild(buildListItem(node, index + 1));
+    });
+
+    list.replaceChildren(fragment);
     renderCollapsed(filtered);
   };
 
   const renderCollapsed = (filteredNodes) => {
-    const collapsedList = document.querySelector(`.${COLLAPSED_LIST_CLASS}`);
-    const preview = document.querySelector(`.${PREVIEW_CLASS}`);
+    const collapsedList = refs.collapsedList;
+    const preview = refs.preview;
     if (!collapsedList || !preview) return;
 
-    collapsedList.innerHTML = "";
     preview.classList.remove("ctn-visible");
+    preview.style.display = "none";
 
-    const getPreviewText = (node) => {
-      const text = getMessageText(node);
-      if (!text) return "(empty)";
-      return text.length > 140 ? `${text.slice(0, 140)}…` : text;
-    };
+    const fragment = document.createDocumentFragment();
 
     filteredNodes.forEach((node) => {
       const id = node.getAttribute(MESSAGE_ATTR);
-      const text = getPreviewText(node);
+      const text = getMessageText(node);
+      const previewText = !text ? "(empty)" : text.length > 140 ? `${text.slice(0, 140)}...` : text;
+
       const dot = document.createElement("div");
       dot.className = "ctn-dot";
       dot.dataset.targetId = id;
-      dot.dataset.preview = text || "(empty)";
+      dot.dataset.preview = previewText;
+
       const role = getRole(node);
       if (role === "user") dot.classList.add("ctn-dot-user");
       if (role === "assistant") dot.classList.add("ctn-dot-assistant");
 
-      collapsedList.appendChild(dot);
+      fragment.appendChild(dot);
     });
 
-    let lastHoverId = null;
-    collapsedList.onmousemove = (event) => {
-      const dot = event.target.closest(".ctn-dot");
-      if (!dot) return;
-      if (lastHoverId !== dot.dataset.targetId) {
-        lastHoverId = dot.dataset.targetId;
-        const rect = dot.getBoundingClientRect();
-        preview.textContent = dot.dataset.preview;
-        preview.style.top = `${Math.max(12, rect.top - 6)}px`;
-        preview.classList.add("ctn-visible");
-        preview.style.display = "block";
-      }
-    };
-
-    collapsedList.onmouseleave = () => {
-      lastHoverId = null;
-      preview.classList.remove("ctn-visible");
-      preview.style.display = "none";
-    };
-
-    collapsedList.onclick = (event) => {
-      const dot = event.target.closest(".ctn-dot");
-      if (!dot) return;
-      const id = dot.dataset.targetId;
-      const target = document.querySelector(`[${MESSAGE_ATTR}="${id}"]`);
-      if (!target) return;
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-      target.classList.add(HIGHLIGHT_CLASS);
-      setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
-    };
+    collapsedList.replaceChildren(fragment);
   };
 
-  const refresh = async () => {
+  const refresh = () => {
     const nodes = getMessageNodes();
     if (nodes.length === 0) return;
 
     ensureMessageIds(nodes);
     lastNodes = nodes;
-
-    if (nodes.length !== lastMessageCount) {
-      lastMessageCount = nodes.length;
-      renderList(nodes);
-    } else {
-      renderCollapsed(
-        nodes.filter((node) => {
-          const role = getRole(node);
-          if (currentMode === MODE_BOTH) return role === "user" || role === "assistant";
-          return role === "user";
-        })
-      );
-    }
+    renderList(nodes);
   };
 
-  const scheduleRefresh = () => {
-    if (scheduled) return;
-    scheduled = requestAnimationFrame(async () => {
-      scheduled = null;
-      await refresh();
-    });
+  const scheduleRefresh = (immediate = false) => {
+    if (immediate) {
+      if (timerHandle) {
+        clearTimeout(timerHandle);
+        timerHandle = null;
+      }
+      if (rafHandle) {
+        cancelAnimationFrame(rafHandle);
+        rafHandle = null;
+      }
+      rafHandle = requestAnimationFrame(() => {
+        rafHandle = null;
+        refresh();
+      });
+      return;
+    }
+
+    if (timerHandle || rafHandle) return;
+
+    timerHandle = window.setTimeout(() => {
+      timerHandle = null;
+      rafHandle = requestAnimationFrame(() => {
+        rafHandle = null;
+        refresh();
+      });
+    }, REFRESH_THROTTLE_MS);
+  };
+
+  const isExtensionNode = (node) => {
+    if (!(node instanceof Element)) return false;
+    if (
+      node.id === PANEL_ID ||
+      node.id === LAUNCHER_ID ||
+      node.id === LIST_ID ||
+      node.classList.contains(PREVIEW_CLASS) ||
+      node.classList.contains(COLLAPSED_LIST_CLASS)
+    ) {
+      return true;
+    }
+    return Boolean(node.closest(`#${PANEL_ID}`) || node.closest(`.${PREVIEW_CLASS}`));
+  };
+
+  const isRelevantMutation = (mutation) => {
+    if (isExtensionNode(mutation.target)) return false;
+
+    if (mutation.type === "characterData") {
+      const parent = mutation.target.parentElement;
+      if (!parent || isExtensionNode(parent)) return false;
+      return Boolean(parent.closest("article,[data-message-author-role],main"));
+    }
+
+    if (mutation.type === "attributes") {
+      const target = mutation.target;
+      if (!(target instanceof Element) || isExtensionNode(target)) return false;
+      return Boolean(target.closest("article,[data-message-author-role],main"));
+    }
+
+    if (mutation.type === "childList") {
+      if (isExtensionNode(mutation.target)) return false;
+      for (const added of mutation.addedNodes) {
+        if (added instanceof Element && !isExtensionNode(added)) return true;
+      }
+      for (const removed of mutation.removedNodes) {
+        if (removed instanceof Element && !isExtensionNode(removed)) return true;
+      }
+      return false;
+    }
+
+    return false;
   };
 
   const installObserver = () => {
-    const observer = new MutationObserver(() => scheduleRefresh());
-    observer.observe(document.body, {
+    if (mutationObserver) return;
+
+    mutationObserver = new MutationObserver((mutations) => {
+      const hasRelevantMutation = mutations.some(isRelevantMutation);
+      if (!hasRelevantMutation) return;
+      if (mutations.some((mutation) => mutation.type === "characterData")) {
+        forceNextRender = true;
+      }
+      if (hasRelevantMutation) {
+        scheduleRefresh();
+      }
+    });
+
+    mutationObserver.observe(document.body, {
       childList: true,
       subtree: true,
-      characterData: true
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["data-message-author-role", "data-testid"]
     });
   };
 
+  const cleanup = () => {
+    if (mutationObserver) {
+      mutationObserver.disconnect();
+      mutationObserver = null;
+    }
+
+    if (timerHandle) {
+      clearTimeout(timerHandle);
+      timerHandle = null;
+    }
+
+    if (rafHandle) {
+      cancelAnimationFrame(rafHandle);
+      rafHandle = null;
+    }
+  };
+
   const init = async () => {
+    if (initialized) return;
+    initialized = true;
+
     createPanel();
     await sleep(400);
-    await refresh();
+    refresh();
     installObserver();
+    window.addEventListener("pagehide", cleanup, { once: true });
   };
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+    document.addEventListener("DOMContentLoaded", init, { once: true });
   } else {
     init();
   }
