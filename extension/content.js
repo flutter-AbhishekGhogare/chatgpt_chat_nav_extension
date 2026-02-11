@@ -1,4 +1,8 @@
 (() => {
+  const CTN_INSTANCE_KEY = "__CTN_NAV_INSTANCE_ACTIVE__";
+  if (window[CTN_INSTANCE_KEY]) return;
+  window[CTN_INSTANCE_KEY] = true;
+
   const PANEL_ID = "ctn-panel";
   const LIST_ID = "ctn-list";
   const ITEM_CLASS = "ctn-item";
@@ -13,26 +17,45 @@
   const PREVIEW_CLASS = "ctn-preview";
   const FOOTER_LINK = "https://abhishek-ghogare.vercel.app/";
   const REFRESH_THROTTLE_MS = 120;
+  const DEBUG_STORAGE_KEY = "ctn-debug-enabled";
+  const MESSAGE_NODE_SELECTORS = [
+    'article[data-testid="conversation-turn"]',
+    "[data-message-author-role]",
+    "main article"
+  ];
 
   let messageCounter = 0;
   let rafHandle = null;
   let timerHandle = null;
   let mutationObserver = null;
+  let observedRoot = null;
   let initialized = false;
   let currentMode = MODE_BOTH;
   let lastNodes = [];
   let lastRenderKey = "";
   let forceNextRender = false;
+  let activeMessageSelector = null;
+  const dirtyMessageIds = new Set();
+  const listItemById = new Map();
+  const dotById = new Map();
+  const perf = {
+    refreshCount: 0,
+    fullRenderCount: 0,
+    patchOnlyCount: 0
+  };
+  let debugEnabled = false;
 
   const refs = {
     panel: null,
     list: null,
     collapsedList: null,
     preview: null,
+    title: null,
     launcher: null
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const isPanelHidden = () => Boolean(refs.panel?.classList.contains("ctn-hidden"));
 
   const scrollToMessage = (id) => {
     if (!id) return;
@@ -42,6 +65,50 @@
     target.scrollIntoView({ behavior: "smooth", block: "start" });
     target.classList.add(HIGHLIGHT_CLASS);
     window.setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), 900);
+  };
+
+  const loadDebugFlag = () => {
+    try {
+      return window.localStorage.getItem(DEBUG_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  };
+
+  const saveDebugFlag = (enabled) => {
+    try {
+      window.localStorage.setItem(DEBUG_STORAGE_KEY, enabled ? "1" : "0");
+    } catch {
+      // Ignore localStorage failures.
+    }
+  };
+
+  const getPerfSnapshot = () => ({
+    refresh: perf.refreshCount,
+    fullRender: perf.fullRenderCount,
+    patchOnly: perf.patchOnlyCount
+  });
+
+  const setDebugEnabled = (enabled) => {
+    debugEnabled = enabled;
+    saveDebugFlag(enabled);
+    if (refs.title) {
+      refs.title.textContent = `Thread Navigator${enabled ? " (Debug)" : ""}`;
+    }
+  };
+
+  const installDebugApi = () => {
+    window.__CTN_DEBUG__ = {
+      enable: () => setDebugEnabled(true),
+      disable: () => setDebugEnabled(false),
+      toggle: () => setDebugEnabled(!debugEnabled),
+      stats: () => getPerfSnapshot(),
+      reset: () => {
+        perf.refreshCount = 0;
+        perf.fullRenderCount = 0;
+        perf.patchOnlyCount = 0;
+      }
+    };
   };
 
   const createPanel = () => {
@@ -115,6 +182,10 @@
     footer.addEventListener("click", () => {
       window.open(FOOTER_LINK, "_blank", "noopener");
     });
+    title.title = "Double-click to toggle debug metrics";
+    title.addEventListener("dblclick", () => {
+      setDebugEnabled(!debugEnabled);
+    });
 
     panel.appendChild(header);
     panel.appendChild(list);
@@ -127,6 +198,7 @@
     refs.list = list;
     refs.collapsedList = collapsedList;
     refs.preview = preview;
+    refs.title = title;
 
     document.body.classList.add(BODY_SHIFT_CLASS);
 
@@ -173,6 +245,9 @@
         document.body.classList.remove(BODY_COLLAPSED_CLASS);
         panel.classList.remove("ctn-collapsed");
         minimizeBtn.textContent = "Min";
+      } else {
+        // Catch up after hidden mode without paying continuous render cost while hidden.
+        scheduleRefresh(true);
       }
     };
 
@@ -222,18 +297,19 @@
   };
 
   const getMessageNodes = () => {
-    const turnNodes = Array.from(
-      document.querySelectorAll('article[data-testid="conversation-turn"]')
-    );
-    if (turnNodes.length > 0) return turnNodes;
+    if (activeMessageSelector) {
+      const activeNodes = Array.from(document.querySelectorAll(activeMessageSelector));
+      if (activeNodes.length > 0) return activeNodes;
+      activeMessageSelector = null;
+    }
 
-    const roleNodes = Array.from(
-      document.querySelectorAll("[data-message-author-role]")
-    );
-    if (roleNodes.length > 0) return roleNodes;
-
-    const articleNodes = Array.from(document.querySelectorAll("main article"));
-    if (articleNodes.length > 0) return articleNodes;
+    for (const selector of MESSAGE_NODE_SELECTORS) {
+      const nodes = Array.from(document.querySelectorAll(selector));
+      if (nodes.length > 0) {
+        activeMessageSelector = selector;
+        return nodes;
+      }
+    }
 
     return [];
   };
@@ -293,6 +369,20 @@
     return button;
   };
 
+  const setListItemText = (item, text) => {
+    const textEl = item.querySelector(".ctn-text");
+    if (textEl) textEl.textContent = text;
+  };
+
+  const getTextBundle = (node) => {
+    const text = getMessageText(node);
+    const title = text.length > 140 ? `${text.slice(0, 140)}...` : text || "(empty)";
+    return {
+      title,
+      preview: title
+    };
+  };
+
   const filterVisibleNodes = (nodes) =>
     nodes.filter((node) => {
       const role = getRole(node);
@@ -312,16 +402,46 @@
     const filtered = filterVisibleNodes(nodes);
     const renderKey = getRenderKey(filtered);
     if (!forceNextRender && renderKey === lastRenderKey) return;
+
+    if (forceNextRender && renderKey === lastRenderKey) {
+      perf.patchOnlyCount += 1;
+      patchRenderedContent(filtered);
+      forceNextRender = false;
+      dirtyMessageIds.clear();
+      return;
+    }
+
+    perf.fullRenderCount += 1;
     lastRenderKey = renderKey;
     forceNextRender = false;
+    dirtyMessageIds.clear();
+    listItemById.clear();
 
     const fragment = document.createDocumentFragment();
     filtered.forEach((node, index) => {
-      fragment.appendChild(buildListItem(node, index + 1));
+      const item = buildListItem(node, index + 1);
+      const id = node.getAttribute(MESSAGE_ATTR);
+      if (id) listItemById.set(id, item);
+      fragment.appendChild(item);
     });
 
     list.replaceChildren(fragment);
     renderCollapsed(filtered);
+  };
+
+  const patchRenderedContent = (filteredNodes) => {
+    filteredNodes.forEach((node) => {
+      const id = node.getAttribute(MESSAGE_ATTR);
+      if (!id) return;
+      if (dirtyMessageIds.size > 0 && !dirtyMessageIds.has(id)) return;
+
+      const bundle = getTextBundle(node);
+      const item = listItemById.get(id);
+      if (item) setListItemText(item, bundle.title);
+
+      const dot = dotById.get(id);
+      if (dot) dot.dataset.preview = bundle.preview;
+    });
   };
 
   const renderCollapsed = (filteredNodes) => {
@@ -331,13 +451,13 @@
 
     preview.classList.remove("ctn-visible");
     preview.style.display = "none";
+    dotById.clear();
 
     const fragment = document.createDocumentFragment();
 
     filteredNodes.forEach((node) => {
       const id = node.getAttribute(MESSAGE_ATTR);
-      const text = getMessageText(node);
-      const previewText = !text ? "(empty)" : text.length > 140 ? `${text.slice(0, 140)}...` : text;
+      const { preview: previewText } = getTextBundle(node);
 
       const dot = document.createElement("div");
       dot.className = "ctn-dot";
@@ -348,6 +468,7 @@
       if (role === "user") dot.classList.add("ctn-dot-user");
       if (role === "assistant") dot.classList.add("ctn-dot-assistant");
 
+      if (id) dotById.set(id, dot);
       fragment.appendChild(dot);
     });
 
@@ -355,11 +476,18 @@
   };
 
   const refresh = () => {
+    perf.refreshCount += 1;
     const nodes = getMessageNodes();
     if (nodes.length === 0) return;
 
     ensureMessageIds(nodes);
     lastNodes = nodes;
+    if (isPanelHidden()) {
+      lastRenderKey = "";
+      forceNextRender = false;
+      dirtyMessageIds.clear();
+      return;
+    }
     renderList(nodes);
   };
 
@@ -434,21 +562,42 @@
     return false;
   };
 
+  const markDirtyMessageIdFromNode = (node) => {
+    if (!node) return;
+    const element = node instanceof Element ? node : node.parentElement;
+    if (!element) return;
+    const messageNode = element.closest(`[${MESSAGE_ATTR}]`);
+    if (!messageNode) return;
+    const id = messageNode.getAttribute(MESSAGE_ATTR);
+    if (id) dirtyMessageIds.add(id);
+  };
+
   const installObserver = () => {
     if (mutationObserver) return;
 
     mutationObserver = new MutationObserver((mutations) => {
-      const hasRelevantMutation = mutations.some(isRelevantMutation);
+      let hasRelevantMutation = false;
+      let hasCharacterDataMutation = false;
+      mutations.forEach((mutation) => {
+        if (!hasRelevantMutation && isRelevantMutation(mutation)) {
+          hasRelevantMutation = true;
+        }
+        if (mutation.type === "characterData") {
+          hasCharacterDataMutation = true;
+          markDirtyMessageIdFromNode(mutation.target);
+          return;
+        }
+        if (mutation.type === "childList") {
+          markDirtyMessageIdFromNode(mutation.target);
+        }
+      });
       if (!hasRelevantMutation) return;
-      if (mutations.some((mutation) => mutation.type === "characterData")) {
-        forceNextRender = true;
-      }
-      if (hasRelevantMutation) {
-        scheduleRefresh();
-      }
+      if (hasCharacterDataMutation) forceNextRender = true;
+      scheduleRefresh();
     });
 
-    mutationObserver.observe(document.body, {
+    observedRoot = document.querySelector("main") || document.body;
+    mutationObserver.observe(observedRoot, {
       childList: true,
       subtree: true,
       characterData: true,
@@ -472,13 +621,23 @@
       cancelAnimationFrame(rafHandle);
       rafHandle = null;
     }
+
+    dirtyMessageIds.clear();
+    listItemById.clear();
+    dotById.clear();
+    observedRoot = null;
+    delete window.__CTN_DEBUG__;
+    delete window[CTN_INSTANCE_KEY];
   };
 
   const init = async () => {
     if (initialized) return;
     initialized = true;
+    debugEnabled = loadDebugFlag();
+    installDebugApi();
 
     createPanel();
+    setDebugEnabled(debugEnabled);
     await sleep(400);
     refresh();
     installObserver();
